@@ -6,5 +6,8 @@
   "author": "justarandomgeek",
   "dependencies": ["base"],
   "factorio_version": "2.0",
-  "description": ""
+  "description": "Record Waveform Traces of Circuit Networks",
+  "package": {
+    "sync_portal_details": true
+  }
 }
