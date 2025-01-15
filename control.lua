@@ -177,6 +177,7 @@ commands.add_command("CTshow", "", function(param)
     rendering.draw_text{
       text = probe.label or tostring(probe.entity.unit_number),
       color = {r=0.3, g=0.3, b=1},
+      orientation = 1/10,
       surface = probe.entity.surface,
       target = {
         entity = probe.entity,
