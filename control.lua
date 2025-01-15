@@ -8,7 +8,7 @@ storage = {
 ---@class TracerProbe
 ---@field entity LuaEntity
 ---@field unit_number integer
-
+---@field label string?
 
 ---@alias WireTraceValues<T> {[QualityID]:{[SignalIDType]:{[string]:T}}}
 ---@alias TraceValues {[integer]:{[defines.wire_connector_id]:WireTraceValues<int32>}}
@@ -50,6 +50,7 @@ local function is_new_value(last, seen, signal)
   local tseen = get_or_create(get_or_create(seen, q), t)
 
   local n = sig.name
+  ---@cast n -?
   tseen[n] = true
 
   local clast = tlast[n]
@@ -78,18 +79,28 @@ script.on_event(defines.events.on_tick, function()
       local pid = entity.unit_number
       local plast = get_or_create(last, pid)
 
-      --TODO: other wire ids to probe at combinators?
+      --TODO: other wire ids to probe at combinators? read outputs too?
       for _, wireid in pairs({defines.wire_connector_id.circuit_red, defines.wire_connector_id.circuit_green}) do
         local signals = entity.get_signals(wireid)
 
-        local wlast = get_or_create(plast, wireid)
+        --- signals seen this tick
         ---@type WireTraceValues<boolean>
         local wseen = {}
+
+        --- last seen values of signals
+        ---@type WireTraceValues<int32>?
+        local wlast = plast[wireid]
+
+        --- change events for this tick
         ---@type WireTraceValues<int32>?
         local wtrace
 
         if signals then
-          
+          -- don't bother recording a wire's "last seen" at all until it actually has a signal on it...
+          if not wlast then
+            wlast = {}
+            plast[wireid] = wlast
+          end
           for _, signal in pairs(signals) do
             if is_new_value(wlast, wseen, signal) then
               if not wtrace then
@@ -102,21 +113,23 @@ script.on_event(defines.events.on_tick, function()
           end
         end
 
-        --zero any in wlast not marked in wseen
-        for q, qlast in pairs(wlast) do
-          local qseen = wseen[q]
-          ---@cast qseen +?
-          for t, tlast in pairs(qlast) do
-            local tseen = qseen and qseen[t]
-            for name, value in pairs(tlast) do
-              if value ~= 0 and not (tseen and tseen[name]) then
-                if not wtrace then
-                  wtrace = get_or_create(get_or_create(tickchanges, pid), wireid)
+        if wlast then
+          --zero any in wlast not marked in wseen
+          for q, qlast in pairs(wlast) do
+            local qseen = wseen[q]
+            ---@cast qseen +?
+            for t, tlast in pairs(qlast) do
+              local tseen = qseen and qseen[t]
+              for name, value in pairs(tlast) do
+                if value ~= 0 and not (tseen and tseen[name]) then
+                  if not wtrace then
+                    wtrace = get_or_create(get_or_create(tickchanges, pid), wireid)
+                  end
+                  
+                  tlast[name] = 0
+                  get_or_create(get_or_create(wtrace, q), t)[name] = 0
+                  has_event = true
                 end
-                
-                tlast[name] = 0
-                get_or_create(get_or_create(wtrace, q), t)[name] = 0
-                has_event = true
               end
             end
           end
@@ -138,6 +151,37 @@ commands.add_command("CTbind", "", function(param)
     storage.probes[ent.unit_number] = {
       entity = ent,
       unit_number = ent.unit_number,
+      label = param.parameter
+    }
+  end
+end)
+
+commands.add_command("CTunbind", "", function(param)
+  if storage.trace then return end
+  local ent = game.get_player(param.player_index).selected
+  if ent and ent.unit_number then
+    storage.probes[ent.unit_number] = nil
+  end
+end)
+
+commands.add_command("CTshow", "", function(param)
+  rendering.clear("circuit-tracer")
+  for _, probe in pairs(storage.probes) do
+    rendering.draw_circle{
+      color = {r=0.3, g=0.3, b=1},
+      radius = .5,
+      surface = probe.entity.surface,
+      target = probe.entity,
+      time_to_live = 300,
+    }
+    rendering.draw_text{
+      text = probe.label or tostring(probe.entity.unit_number),
+      color = {r=0.3, g=0.3, b=1},
+      surface = probe.entity.surface,
+      target = {
+        entity = probe.entity,
+      }--[[@as ScriptRenderTargetTable]],
+      time_to_live = 300,
     }
   end
 end)
@@ -177,54 +221,66 @@ local hexbits = {
 ---@param n int32
 ---@return string
 local function int_to_bin(n)
+  if n == 0 then 
+    return "z"
+  end
   return (string.gsub(string.sub(string.format("%x", n), -8), "%x", hexbits))
 end
+
+local wirename = {
+  "red", "green", "outred", "outgreen"
+}
 
 commands.add_command("CTstop", "", function(param)
   local trace = storage.trace
   if not trace then return end
 
-  --TODO: dump it before deleting...
   ---@type string[]
-  local dump = {}
+  local out = {}
 
   ---@type TraceValues
   local ids = {}
   local nextid = 1
 
+  local probes = storage.probes
+
   for pid, ptrace in pairs(trace.last) do
-    dump[#dump+1] = string.format("$scope module probe_%d $end", pid)
+    local plabel = probes[pid].label
+    if plabel then
+      out[#out+1] = string.format("$scope module %s $end", plabel)
+    else
+      out[#out+1] = string.format("$scope module probe_%d $end", pid)
+    end
     local pids = get_or_create(ids, pid)
     for wireid, wtrace in pairs(ptrace) do
-      --TODO: wire names
-      dump[#dump+1] = string.format("$scope module wire_%d $end", wireid)
+      out[#out+1] = string.format("$scope module %s $end", wirename[wireid])
       local wids = get_or_create(pids, wireid)
       for qual, qtrace in pairs(wtrace) do
-        dump[#dump+1] = string.format("$scope module %s $end", qual)
+        out[#out+1] = string.format("$scope module %s $end", qual)
         local qids = get_or_create(wids, qual)
         for sigtype, ttrace in pairs(qtrace) do
-          dump[#dump+1] = string.format("$scope module %s $end", sigtype)
+          out[#out+1] = string.format("$scope module %s $end", sigtype)
           local tids = get_or_create(qids, sigtype)
           for name, value in pairs(ttrace) do
             local id = nextid
             nextid = nextid + 1
             tids[name] = id
-            dump[#dump+1] = string.format("$var wire 32 %x %s $end", id, name)
+            out[#out+1] = string.format("$var wire 32 %x %s $end", id, name)
           end
-          dump[#dump+1] = "$upscope $end"
+          out[#out+1] = "$upscope $end"
         end
-        dump[#dump+1] = "$upscope $end"
+        out[#out+1] = "$upscope $end"
       end
-      dump[#dump+1] = "$upscope $end"
+      out[#out+1] = "$upscope $end"
     end
-    dump[#dump+1] = "$upscope $end"
+    out[#out+1] = "$upscope $end"
   end
-  dump[#dump+1] = "$enddefinitions $end"
+  out[#out+1] = "$enddefinitions $end"
 
   local start = trace.start
   for _, changes in pairs(trace.changes) do
     local t = changes.tick - start
-    dump[#dump+1] = string.format("#%d", t)
+    out[#out+1] = string.format("#%d", t)
 
     for pid, pchanges in pairs(changes.values) do
       for wireid, wchanges in pairs(pchanges) do
@@ -232,7 +288,7 @@ commands.add_command("CTstop", "", function(param)
           for tid, tchanges in pairs(qchanges) do
             for name, value in pairs(tchanges) do
               local id = ids[pid][wireid][qid][tid][name]
-              dump[#dump+1] = string.format("b%s %x", int_to_bin(value), id or 0 )
+              out[#out+1] = string.format("b%s %x", int_to_bin(value), id or 0 )
             end
           end
         end
@@ -241,7 +297,7 @@ commands.add_command("CTstop", "", function(param)
 
   end
 
-  helpers.write_file(string.format("trace_%d.vcd", start), table.concat(dump, "\n"))
+  helpers.write_file(string.format("trace_%d.vcd", start), table.concat(out, "\n"))
 
   storage.trace = nil
 end)
