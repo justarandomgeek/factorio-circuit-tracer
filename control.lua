@@ -11,7 +11,7 @@ storage = {
 ---@field label string?
 
 ---@alias WireTraceValues<T> {[QualityID]:{[SignalIDType]:{[string]:T}}}
----@alias TraceValues<T> {[integer]:{[defines.wire_connector_id]:WireTraceValues<T>}}
+---@alias TraceValues<T> {[integer]:{[defines.wire_connector_id|(-1)]:WireTraceValues<T>}}
 
 ---@alias TraceLastRangeValue {last:int32, min:int32, max:int32}
 
@@ -84,11 +84,77 @@ local wires_with_out = {
   defines.wire_connector_id.combinator_output_red, defines.wire_connector_id.combinator_output_green
 }
 
-local has_out = {
+local combinator_types = {
   ["arithmetic-combinator"] = true,
   ["decider-combinator"] = true,
   ["selector-combinator"] = true,
 }
+
+
+---@param signals Signal[]?
+---@param plast {[defines.wire_connector_id|(-1)]:WireTraceValues<TraceLastRangeValue>}
+---@param wireid defines.wire_connector_id|(-1)
+---@param tickchanges TraceValues<int32>
+---@param pid integer
+---@return boolean has_event
+local function trace_signals(signals, plast, wireid, tickchanges, pid)
+  local has_event = false
+  --- signals seen this tick
+  ---@type WireTraceValues<boolean>
+  local wseen = {}
+
+  --- last seen values of signals
+  ---@type WireTraceValues<TraceLastRangeValue>?
+  local wlast = plast[wireid]
+
+  --- change events for this tick
+  ---@type WireTraceValues<int32>?
+  local wtrace
+
+  if signals then
+    -- don't bother recording a wire's "last seen" at all until it actually has a signal on it...
+    if not wlast then
+      wlast = {}
+      plast[wireid] = wlast
+    end
+    for _, signal in pairs(signals) do
+      if is_new_value(wlast, wseen, signal) then
+        if not wtrace then
+          wtrace = get_or_create(get_or_create(tickchanges, pid), wireid)
+        end
+        local sig = signal.signal
+        get_or_create(get_or_create(wtrace, sig.quality or "normal"), sig.type or "item")[sig.name] = signal.count
+        has_event = true
+      end
+    end
+  end
+
+  if wlast then
+    --zero any in wlast not marked in wseen
+    for q, qlast in pairs(wlast) do
+      local qseen = wseen[q]
+      ---@cast qseen +?
+      for t, tlast in pairs(qlast) do
+        local tseen = qseen and qseen[t]
+        for name, value in pairs(tlast) do
+          if value.last ~= 0 and not (tseen and tseen[name]) then
+            if not wtrace then
+              wtrace = get_or_create(get_or_create(tickchanges, pid), wireid)
+            end
+            
+            -- range will always include 0 alreayd, so we can just reset .last
+            value.last = 0
+
+            get_or_create(get_or_create(wtrace, q), t)[name] = 0
+            has_event = true
+          end
+        end
+      end
+    end
+  end
+
+  return has_event
+end
 
 script.on_event(defines.events.on_tick, function()
   local trace = storage.trace
@@ -106,66 +172,24 @@ script.on_event(defines.events.on_tick, function()
       probes[key] = nil
     else
       local pid = entity.unit_number
+      ---@cast pid -?
       local plast = get_or_create(last, pid)
 
-      local wids = has_out[entity.type] and wires_with_out or wires
+      local wids = wires
+      if combinator_types[entity.type] then
+        wids = wires_with_out
+        local control = entity.get_control_behavior()
+        if control then
+          ---@cast control LuaCombinatorControlBehavior
+          if trace_signals(control.signals_last_tick, plast, -1, tickchanges, pid) then
+            has_event = true
+          end
+        end
+      end 
       for _, wireid in pairs(wids) do
-        local signals = entity.get_signals(wireid)
-
-        --- signals seen this tick
-        ---@type WireTraceValues<boolean>
-        local wseen = {}
-
-        --- last seen values of signals
-        ---@type WireTraceValues<TraceLastRangeValue>?
-        local wlast = plast[wireid]
-
-        --- change events for this tick
-        ---@type WireTraceValues<int32>?
-        local wtrace
-
-        if signals then
-          -- don't bother recording a wire's "last seen" at all until it actually has a signal on it...
-          if not wlast then
-            wlast = {}
-            plast[wireid] = wlast
-          end
-          for _, signal in pairs(signals) do
-            if is_new_value(wlast, wseen, signal) then
-              if not wtrace then
-                wtrace = get_or_create(get_or_create(tickchanges, pid), wireid)
-              end
-              local sig = signal.signal
-              get_or_create(get_or_create(wtrace, sig.quality or "normal"), sig.type or "item")[sig.name] = signal.count
-              has_event = true
-            end
-          end
+        if trace_signals(entity.get_signals(wireid), plast, wireid, tickchanges, pid) then
+          has_event = true
         end
-
-        if wlast then
-          --zero any in wlast not marked in wseen
-          for q, qlast in pairs(wlast) do
-            local qseen = wseen[q]
-            ---@cast qseen +?
-            for t, tlast in pairs(qlast) do
-              local tseen = qseen and qseen[t]
-              for name, value in pairs(tlast) do
-                if value.last ~= 0 and not (tseen and tseen[name]) then
-                  if not wtrace then
-                    wtrace = get_or_create(get_or_create(tickchanges, pid), wireid)
-                  end
-                  
-                  -- range will always include 0 alreayd, so we can just reset .last
-                  value.last = 0
-
-                  get_or_create(get_or_create(wtrace, q), t)[name] = 0
-                  has_event = true
-                end
-              end
-            end
-          end
-        end
-
       end
     end
   end
@@ -297,7 +321,8 @@ local function int_to_bin(n, nbits)
 end
 
 local wirename = {
-  "red", "green", "outred", "outgreen"
+  "red", "green", "outred", "outgreen",
+  [-1] = "self"
 }
 
 commands.add_command("CTstop", "", function(param)
