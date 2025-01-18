@@ -12,6 +12,6 @@ This mod operates entirely through console commands:
 
 `/CTstop` stop a trace and write out a .vcd file to script-output
 
-Signals that start with a value of zero will trace as `X` until their first recorded event, and returning to zero will trace as `Z`, to better highlight flag-style signals.
+Traced signals will be truncated to the smallest whole hex digit size that can contain their full range, or to a single bit if possible. Multi-bit signals will trace 0 as `Z` to better highlight pulsed values.
 
 View the resulting file with any VCD waveform viewer, such as: [VaporView](https://github.com/Lramseyer/vaporview) [Surfer](https://surfer-project.org/) [GTKWave](https://gtkwave.sourceforge.net/)

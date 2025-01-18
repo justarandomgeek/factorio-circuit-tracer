@@ -302,6 +302,11 @@ commands.add_command("CTstop", "", function(param)
 
   ---@type string[]
   local out = {}
+  local outi = 1
+
+  ---@type string[]
+  local init = {}
+  local initi = 1
 
   ---@type TraceValues<{id:int32, size:int32}>
   local ids = {}
@@ -312,19 +317,24 @@ commands.add_command("CTstop", "", function(param)
   for pid, ptrace in pairs(trace.last) do
     local plabel = probes[pid].label
     if plabel then
-      out[#out+1] = string.format("$scope module %s $end", plabel)
+      out[outi] = string.format("$scope module %s $end", plabel)
+      outi = outi + 1
     else
-      out[#out+1] = string.format("$scope module probe_%d $end", pid)
+      out[outi] = string.format("$scope module probe_%d $end", pid)
+      outi = outi + 1
     end
     local pids = get_or_create(ids, pid)
     for wireid, wtrace in pairs(ptrace) do
-      out[#out+1] = string.format("$scope module %s $end", wirename[wireid])
+      out[outi] = string.format("$scope module %s $end", wirename[wireid])
+      outi = outi + 1
       local wids = get_or_create(pids, wireid)
       for qual, qtrace in pairs(wtrace) do
-        out[#out+1] = string.format("$scope module %s $end", qual)
+        out[outi] = string.format("$scope module %s $end", qual)
+        outi = outi + 1
         local qids = get_or_create(wids, qual)
         for sigtype, ttrace in pairs(qtrace) do
-          out[#out+1] = string.format("$scope module %s $end", sigtype)
+          out[outi] = string.format("$scope module %s $end", sigtype)
+          outi = outi + 1
           local tids = get_or_create(qids, sigtype)
           for name, value in pairs(ttrace) do
             ---@cast value TraceLastRangeValue
@@ -332,22 +342,46 @@ commands.add_command("CTstop", "", function(param)
             nextid = nextid + 1
             local size = bitsize(value.min, value.max)
             tids[name] = { id = id, size = size }
-            out[#out+1] = string.format("$var wire %d %x %s $end", size, id, name)
+            out[outi] = string.format("$var wire %d %x %s $end", size, id, name)
+            outi = outi + 1
+
+            if size == 1 then
+              init[initi] = string.format("0%x", id)
+              initi = initi + 1
+            else
+              init[initi] = string.format("bz %x", id)
+              initi = initi + 1
+            end
           end
-          out[#out+1] = "$upscope $end"
+          out[outi] = "$upscope $end"
+          outi = outi + 1
         end
-        out[#out+1] = "$upscope $end"
+        out[outi] = "$upscope $end"
+        outi = outi + 1
       end
-      out[#out+1] = "$upscope $end"
+      out[outi] = "$upscope $end"
+      outi = outi + 1
     end
-    out[#out+1] = "$upscope $end"
+    out[outi] = "$upscope $end"
+    outi = outi + 1
   end
-  out[#out+1] = "$enddefinitions $end"
+  out[outi] = "$enddefinitions $end"
+  outi = outi + 1
+
+  out[outi] = "$dumpvars $end"
+  outi = outi + 1
+
+  out[outi] = table.concat(init, "\n")
+  outi = outi + 1
+
+  out[outi] = "$end"
+  outi = outi + 1
 
   local start = trace.start
   for _, changes in pairs(trace.changes) do
     local t = changes.tick - start
-    out[#out+1] = string.format("#%d", t)
+    out[outi] = string.format("#%d", t)
+    outi = outi + 1
 
     for pid, pchanges in pairs(changes.values) do
       for wireid, wchanges in pairs(pchanges) do
@@ -356,11 +390,12 @@ commands.add_command("CTstop", "", function(param)
             for name, value in pairs(tchanges) do
               local id = ids[pid][wireid][qid][tid][name] --[[@as {id:int32, size:int32}]]
               if id.size == 1 then
-                out[#out+1] = string.format("%d%x", value, id.id)
+                out[outi] = string.format("%d%x", value, id.id)
+                outi = outi + 1
               else
-                out[#out+1] = string.format("b%s %x", int_to_bin(value, id.size), id.id)
+                out[outi] = string.format("b%s %x", int_to_bin(value, id.size), id.id)
+                outi = outi + 1
               end
-              
             end
           end
         end
