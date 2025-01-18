@@ -11,12 +11,14 @@ storage = {
 ---@field label string?
 
 ---@alias WireTraceValues<T> {[QualityID]:{[SignalIDType]:{[string]:T}}}
----@alias TraceValues {[integer]:{[defines.wire_connector_id]:WireTraceValues<int32>}}
+---@alias TraceValues<T> {[integer]:{[defines.wire_connector_id]:WireTraceValues<T>}}
+
+---@alias TraceLastRangeValue {last:int32, min:int32, max:int32}
 
 ---@class TraceData
 ---@field start uint64
----@field last TraceValues # last seen values, also serves as list of all seen signals when it's time to write out a file
----@field changes {tick:uint64, values:TraceValues}[] 
+---@field last TraceValues<TraceLastRangeValue> # last seen values, also serves as list of all seen signals when it's time to write out a file
+---@field changes {tick:uint64, values:TraceValues<int32>}[] 
 
 
 
@@ -39,7 +41,7 @@ local function get_or_create(t,k)
   return v
 end
 
----@param last WireTraceValues<int32>
+---@param last WireTraceValues<TraceLastRangeValue>
 ---@param seen WireTraceValues<boolean>
 ---@param signal Signal
 local function is_new_value(last, seen, signal)
@@ -54,8 +56,19 @@ local function is_new_value(last, seen, signal)
   tseen[n] = true
 
   local clast = tlast[n]
-  if clast ~= signal.count then
-    tlast[n] = signal.count
+  local x = signal.count
+  if (not clast) then
+    clast = {
+      last = x,
+      min = math.min(0, x),
+      max = math.max(0, x),
+    }
+    tlast[n] = clast
+    return true
+  elseif (clast.last ~= x) then
+    clast.last = x
+    clast.min = math.min(clast.min, x)
+    clast.max = math.max(clast.max, x)
     return true
   end
   return false
@@ -78,7 +91,7 @@ script.on_event(defines.events.on_tick, function()
   if not trace then return end
 
   local last = trace.last
-  ---@type TraceValues
+  ---@type TraceValues<int32>
   local tickchanges = {}
   local has_event = false
 
@@ -100,7 +113,7 @@ script.on_event(defines.events.on_tick, function()
         local wseen = {}
 
         --- last seen values of signals
-        ---@type WireTraceValues<int32>?
+        ---@type WireTraceValues<TraceLastRangeValue>?
         local wlast = plast[wireid]
 
         --- change events for this tick
@@ -133,12 +146,14 @@ script.on_event(defines.events.on_tick, function()
             for t, tlast in pairs(qlast) do
               local tseen = qseen and qseen[t]
               for name, value in pairs(tlast) do
-                if value ~= 0 and not (tseen and tseen[name]) then
+                if value.last ~= 0 and not (tseen and tseen[name]) then
                   if not wtrace then
                     wtrace = get_or_create(get_or_create(tickchanges, pid), wireid)
                   end
                   
-                  tlast[name] = 0
+                  -- range will always include 0 alreayd, so we can just reset .last
+                  value.last = 0
+
                   get_or_create(get_or_create(wtrace, q), t)[name] = 0
                   has_event = true
                 end
@@ -231,13 +246,50 @@ local hexbits = {
   ["f"]="1111",
 }
 
+local function bitsize(min,max)
+  if min == 0 and max == 1 then
+    return 1
+  end
+
+  if (min >= -0x8 and max <= 0x7) or (min == 0 and max <= 0xf) then
+    return 4
+  end
+
+  if (min >= -0x80 and max <= 0x7f) or (min == 0 and max <= 0xff) then
+    return 8
+  end
+
+  if (min >= -0x800 and max <= 0x7ff) or (min == 0 and max <= 0xfff) then
+    return 12
+  end
+
+  if (min >= -0x8000 and max <= 0x7fff) or (min == 0 and max <= 0xffff) then
+    return 16
+  end
+
+  if (min >= -0x80000 and max <= 0x7ffff) or (min == 0 and max <= 0xfffff) then
+    return 20
+  end
+
+  if (min >= -0x800000 and max <= 0x7fffff) or (min == 0 and max <= 0xffffff) then
+    return 24
+  end
+
+  if (min >= -0x8000000 and max <= 0x7ffffff) or (min == 0 and max <= 0xfffffff) then
+    return 28
+  end
+
+  return 32
+end
+
 ---@param n int32
+---@param nbits int32
 ---@return string
-local function int_to_bin(n)
+local function int_to_bin(n, nbits)
   if n == 0 then 
     return "z"
   end
-  return (string.gsub(string.sub(string.format("%x", n), -8), "%x", hexbits))
+  return (string.gsub(string.sub(string.format("%x", n), (nbits/-4)), "%x", hexbits))
 end
 
 local wirename = {
@@ -251,7 +303,7 @@ commands.add_command("CTstop", "", function(param)
   ---@type string[]
   local out = {}
 
-  ---@type TraceValues
+  ---@type TraceValues<{id:int32, size:int32}>
   local ids = {}
   local nextid = 1
 
@@ -275,10 +327,12 @@ commands.add_command("CTstop", "", function(param)
           out[#out+1] = string.format("$scope module %s $end", sigtype)
           local tids = get_or_create(qids, sigtype)
           for name, value in pairs(ttrace) do
+            ---@cast value TraceLastRangeValue
             local id = nextid
             nextid = nextid + 1
-            tids[name] = id
-            out[#out+1] = string.format("$var wire 32 %x %s $end", id, name)
+            local size = bitsize(value.min, value.max)
+            tids[name] = { id = id, size = size }
+            out[#out+1] = string.format("$var wire %d %x %s $end", size, id, name)
           end
           out[#out+1] = "$upscope $end"
         end
@@ -300,8 +354,13 @@ commands.add_command("CTstop", "", function(param)
         for qid, qchanges in pairs(wchanges) do
           for tid, tchanges in pairs(qchanges) do
             for name, value in pairs(tchanges) do
-              local id = ids[pid][wireid][qid][tid][name]
-              out[#out+1] = string.format("b%s %x", int_to_bin(value), id or 0 )
+              local id = ids[pid][wireid][qid][tid][name] --[[@as {id:int32, size:int32}]]
+              if id.size == 1 then
+                out[#out+1] = string.format("%d%x", value, id.id)
+              else
+                out[#out+1] = string.format("b%s %x", int_to_bin(value, id.size), id.id)
+              end
+              
             end
           end
         end
