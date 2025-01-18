@@ -61,6 +61,18 @@ local function is_new_value(last, seen, signal)
   return false
 end
 
+local wires = { defines.wire_connector_id.circuit_red, defines.wire_connector_id.circuit_green }
+local wires_with_out = {
+  defines.wire_connector_id.combinator_input_red, defines.wire_connector_id.combinator_input_green,
+  defines.wire_connector_id.combinator_output_red, defines.wire_connector_id.combinator_output_green
+}
+
+local has_out = {
+  ["arithmetic-combinator"] = true,
+  ["decider-combinator"] = true,
+  ["selector-combinator"] = true,
+}
+
 script.on_event(defines.events.on_tick, function()
   local trace = storage.trace
   if not trace then return end
@@ -79,8 +91,8 @@ script.on_event(defines.events.on_tick, function()
       local pid = entity.unit_number
       local plast = get_or_create(last, pid)
 
-      --TODO: other wire ids to probe at combinators? read outputs too?
-      for _, wireid in pairs({defines.wire_connector_id.circuit_red, defines.wire_connector_id.circuit_green}) do
+      local wids = has_out[entity.type] and wires_with_out or wires
+      for _, wireid in pairs(wids) do
         local signals = entity.get_signals(wireid)
 
         --- signals seen this tick
@@ -147,7 +159,7 @@ end)
 commands.add_command("CTbind", "", function(param)
   if storage.trace then return end
   local ent = game.get_player(param.player_index).selected
-  if ent and ent.type == "electric-pole" then
+  if ent and ent.unit_number then
     storage.probes[ent.unit_number] = {
       entity = ent,
       unit_number = ent.unit_number,
