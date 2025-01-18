@@ -1,6 +1,6 @@
 This mod operates entirely through console commands:
 
-`/CTbind [name]` bind the power pole under the cursor as a probe (with optional label). cannot be used while a trace is running.
+`/CTbind [name]` bind the entity under the cursor as a probe (with optional label). cannot be used while a trace is running.
 
 `/CTunbind` unbind the probe under the cursor. cannot be used while a trace is running.
 
