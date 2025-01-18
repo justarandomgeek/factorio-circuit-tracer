@@ -26,6 +26,10 @@ script.on_configuration_changed(function(config_changed)
   if not storage.probes then
     storage.probes = {}
   end
+  if storage.trace then
+    game.print("trace discarded due to config change")
+    storage.trace = nil
+  end
 end)
 
 ---@generic K,V
