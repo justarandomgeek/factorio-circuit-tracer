@@ -1,0 +1,7 @@
+---------------------------------------------------------------------------------------------------
+Version: 2.0.1
+Date: ????
+  Changes:
+    - Allow using anything as probe, not just poles
+    - Truncate signal bit size based on used range (whole hex digit sizes, or single bit)
+    - Record virtual "self" wire for combinators own outputs
