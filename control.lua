@@ -397,7 +397,7 @@ commands.add_command("CTstop", "", function(param)
   out[outi] = "$enddefinitions $end"
   outi = outi + 1
 
-  out[outi] = "$dumpvars $end"
+  out[outi] = "$dumpvars"
   outi = outi + 1
 
   out[outi] = table.concat(init, "\n")
