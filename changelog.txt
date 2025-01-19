@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 2.0.1
-Date: ????
+Date: 2025-01-19
   Changes:
     - Allow using anything as probe, not just poles
     - Truncate signal bit size based on used range (whole hex digit sizes, or single bit)
