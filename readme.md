@@ -12,6 +12,6 @@ This mod operates entirely through console commands:
 
 `/CTstop` stop a trace and write out a .vcd file to script-output
 
-Traced signals will be truncated to the smallest whole hex digit size that can contain their full range, or to a single bit if possible. Multi-bit signals will trace 0 as `Z` to better highlight pulsed values.
+Traced signals will be truncated to the smallest whole hex digit size that can contain their full range, or to a single bit if possible. Multi-bit signals will trace 0 as `Z` to better highlight pulsed values, and to reflect the no-zeroes nature of circuit wires.
 
 View the resulting file with any VCD waveform viewer, such as: [VaporView](https://github.com/Lramseyer/vaporview) [Surfer](https://surfer-project.org/) [GTKWave](https://gtkwave.sourceforge.net/)
