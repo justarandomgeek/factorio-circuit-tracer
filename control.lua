@@ -166,13 +166,11 @@ script.on_event(defines.events.on_tick, function()
   local has_event = false
 
   local probes = storage.probes
-  for key, probe in pairs(probes) do
+  for pid, probe in pairs(probes) do
     local entity = probe.entity
     if not (entity and entity.valid) then
-      probes[key] = nil
+      probes[pid] = nil
     else
-      local pid = entity.unit_number
-      ---@cast pid -?
       local plast = get_or_create(last, pid)
 
       local wids = wires
@@ -221,24 +219,27 @@ end)
 
 commands.add_command("CTshow", "", function(param)
   rendering.clear("circuit-tracer")
-  for _, probe in pairs(storage.probes) do
-    rendering.draw_circle{
-      color = {r=0.3, g=0.3, b=1},
-      radius = .5,
-      surface = probe.entity.surface,
-      target = probe.entity,
-      time_to_live = 300,
-    }
-    rendering.draw_text{
-      text = probe.label or tostring(probe.entity.unit_number),
-      color = {r=0.3, g=0.3, b=1},
-      orientation = 1/10,
-      surface = probe.entity.surface,
-      target = {
-        entity = probe.entity,
-      }--[[@as ScriptRenderTargetTable]],
-      time_to_live = 300,
-    }
+  for pid, probe in pairs(storage.probes) do
+    local entity = probe.entity
+    if not (entity and entity.valid) then
+      storage.probes[pid] = nil
+    else
+      rendering.draw_circle{
+        color = {r=0.3, g=0.3, b=1},
+        radius = .5,
+        surface = entity.surface,
+        target = entity,
+        time_to_live = 300,
+      }
+      rendering.draw_text{
+        text = probe.label or tostring(pid),
+        color = {r=0.3, g=0.3, b=1},
+        orientation = 1/10,
+        surface = entity.surface,
+        target = entity,
+        time_to_live = 300,
+      }
+    end
   end
 end)
 
@@ -344,7 +345,8 @@ commands.add_command("CTstop", "", function(param)
   local probes = storage.probes
 
   for pid, ptrace in pairs(trace.last) do
-    local plabel = probes[pid].label
+    local probe = probes[pid]
+    local plabel = probe and probe.label
     if plabel then
       out[outi] = string.format("$scope module %s $end", plabel)
       outi = outi + 1
