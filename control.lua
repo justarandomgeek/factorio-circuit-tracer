@@ -275,40 +275,46 @@ local hexbits = {
   ["f"]="1111",
 }
 
+---@param min int32
+---@param max int32
+---@return integer bitsize
+---@return boolean? signed
 local function bitsize(min,max)
   if min == 0 and max == 1 then
     return 1
   end
 
+  local signed = min<0
+
   if (min >= -0x8 and max <= 0x7) or (min == 0 and max <= 0xf) then
-    return 4
+    return 4, signed
   end
 
   if (min >= -0x80 and max <= 0x7f) or (min == 0 and max <= 0xff) then
-    return 8
+    return 8, signed
   end
 
   if (min >= -0x800 and max <= 0x7ff) or (min == 0 and max <= 0xfff) then
-    return 12
+    return 12, signed
   end
 
   if (min >= -0x8000 and max <= 0x7fff) or (min == 0 and max <= 0xffff) then
-    return 16
+    return 16, signed
   end
 
   if (min >= -0x80000 and max <= 0x7ffff) or (min == 0 and max <= 0xfffff) then
-    return 20
+    return 20, signed
   end
 
   if (min >= -0x800000 and max <= 0x7fffff) or (min == 0 and max <= 0xffffff) then
-    return 24
+    return 24, signed
   end
 
   if (min >= -0x8000000 and max <= 0x7ffffff) or (min == 0 and max <= 0xfffffff) then
-    return 28
+    return 28, signed
   end
 
-  return 32
+  return 32, signed
 end
 
 ---@param n int32
@@ -371,9 +377,11 @@ commands.add_command("CTstop", "", function(param)
             ---@cast value TraceLastRangeValue
             local id = nextid
             nextid = nextid + 1
-            local size = bitsize(value.min, value.max)
+            local size, signed = bitsize(value.min, value.max)
             tids[name] = { id = id, size = size }
             out[outi] = string.format("$var wire %d %x %s $end", size, id, name)
+            outi = outi + 1
+            out[outi] = string.format("$comment range %x %s%d $end", id, signed and "s" or "u",  size)
             outi = outi + 1
 
             if size == 1 then
